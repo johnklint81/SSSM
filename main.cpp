@@ -1,47 +1,106 @@
 #include <iostream>
 #include <cmath>
 #include <fstream>
-#include <complex>
 #include <fftw3.h>
 
 using namespace::std;
 
-double k(int i, const int xy_grid, const int xy_interval);
+double k(int i, int xy_grid, int xy_interval);
 double potential(double x, double y);
 double test_potential(double x, double y);
 double Psi0(double x, double y);
 double test_Psi0(double x, double y);
 int index(int i, int j, int N);
+void time_evolution(char* filename, int xy_interval, double dxy, int xy_grid, int time_grid, double dt,
+                    double kx, double ky, double norm, int x01, int y00, double V, double*** Psi);
 
 int main() {
     // Initialize variables etc.
     char filename[9] = "SSSS.csv";
     const int xy_interval = 20;
+    // dxy must be smaller or equal to 0.1 and there must exist an integer z so that z * dxy = 0.1 for indices to be
+    // able to resolve x = 0.1 and y = 0.0. It is also assumed that dx = dy!
     const double dxy = 0.1;
+    // xy_grid must be of size (xy_interval / dxy + 1) to be symmetric and
+    // include endpoints of the interval -10 <= x,y <= 10
     const int xy_grid = xy_interval / dxy + 1;
-    const int time_grid = 1000;
+    // dt = 0.1 seems to be a good time step
     const double dt = 0.1;
-    double kx;
-    double ky;
+    const int time_grid = 100 / dt;
+    double kx = {};
+    double ky = {};
     double norm =  xy_grid * xy_grid;
     // Indices for x = 0.1 and y = 0.0 when dxy = 0.1
-    int x01 = {xy_grid/2 + 1};
-    int y00 = {xy_grid/2};
+    int x01 = {xy_grid / 2 + int(0.1 / dxy)};
+    int y00 = {xy_grid / 2};
     // Initialize potential and wave function array
-    double V;
+    double V = {};
     // Allocate memory for the wave function Psi[xy_grid][xy_grid][2]
     auto*** Psi = (double***)malloc(xy_grid * sizeof(double**));
     for (int i = 0; i < xy_grid; i++) {
         Psi[i] = (double**)malloc(xy_grid * sizeof(double*));
-            for (int j = 0; j < xy_grid; j++)
-                Psi[i][j] = (double*)malloc(2 * sizeof(double));
+            for (int j = 0; j < xy_grid; j++) {
+                Psi[i][j] = (double *) malloc(2 * sizeof(double));
+            }
     }
     cout << "Simulate time evolution of Psi(x = " << -10 + dxy * x01 << ", y = " << -10 + dxy * y00 << ")" << endl;
+    // Run the simulation
+    time_evolution(filename, xy_interval, dxy, xy_grid, time_grid, dt, kx, ky, norm, x01, y00, V, Psi);
+    return 0;
+}
 
+// Function to create wave vector k
+double k(int i, int xy_grid, int xy_interval) {
+    double k;
+    if (i < (xy_grid / 2 + 1)) {
+        k = i * (2 * M_PI) / xy_interval;
+    }
+    else  {
+        k = 2 * M_PI  / xy_interval * (i -  xy_grid);
+    }
+    return k;
+}
+
+// Function to create the potential V(x,y)
+double potential(double x, double y) {
+    double V;
+    V = - 5 * pow( (1 + pow((x / 5), 2) + pow((y / 4), 2) ), - 4);
+    return V;
+}
+
+// Function to create a test_potential V(x,y) = 0
+double test_potential(double x, double y) {
+    double V;
+    V = 0.0;
+    return V;
+}
+
+// Function to convert matrix indices to array indices (row)
+int index(int i, int j, int N) {
+    return i + N * j;
+}
+
+// Function to create Psi(t=0)
+double Psi0(double x, double y) {
+    double Psi;
+    Psi = (1 / M_PI) * exp(- ( pow((x - 1), 2) + pow((y - 1), 2) ) );
+    return Psi;
+}
+
+// Function to create test wave function
+double test_Psi0(double x, double y) {
+    double Psi;
+    Psi = sin(x);
+    return Psi;
+}
+
+// Function to perform the time evolution of the spectral split step solver
+void time_evolution(char* filename, int xy_interval, double dxy, int xy_grid, int time_grid, double dt,
+                    double kx, double ky, double norm, int x01, int y00, double V, double*** Psi) {
     // Loop to create wave function (and k according to 0, ... n, -n, ... -1)
     for (int i = 0; i < xy_grid; i++) {
         for (int j = 0; j < xy_grid; j++) {
-            // Change Psi0 to test_Psi0 for a simple sin(x+y) function
+            // Change Psi0 to test_Psi0 for a simple sine function
             Psi[i][j][0] = Psi0(- 10 + dxy * i, -10 + dxy * j);
             Psi[i][j][1] = 0;
         }
@@ -97,9 +156,9 @@ int main() {
                 ecos = cos(dt / 2 * V);
                 esin = -sin(dt / 2 * V);
                 Psi[i][j][0] = (ecos * backward[index(i, j, xy_grid)][0]- esin * backward[index(i, j, xy_grid)][1])
-                        / norm;
+                               / norm;
                 Psi[i][j][1] = (ecos * backward[index(i, j, xy_grid)][1] + esin * backward[index(i, j, xy_grid)][0])
-                        / norm;
+                               / norm;
             }
         }
         // Write the temporal spectrum of Psi(0.1,0) to file
@@ -111,49 +170,4 @@ int main() {
     fftw_free(forward);
     fftw_free(backward);
     free(Psi);
-    return 0;
-}
-
-// Function to create wave vector k
-double k(int i, const int xy_grid, const int xy_interval) {
-    double k;
-    if (i < (xy_grid / 2 + 1)) {
-        k = i * (2 * M_PI) / xy_interval;
-    }
-    else  {
-        k = 2 * M_PI  / xy_interval * (i -  xy_grid);
-    }
-    return k;
-}
-
-// Function to create the potential V(x,y)
-double potential(double x, double y) {
-    double V;
-    V = - 5 * pow( (1 + pow((x / 5), 2) + pow((y / 4), 2) ), - 4);
-    return V;
-}
-
-// Function to create a test_potential V(x,y) = 0
-double test_potential(double x, double y) {
-    double V;
-    V = 0.0;
-    return V;
-}
-
-// Function to convert matrix indices to array indices (row)
-int index(int i, int j, int N) {
-    return i + N * j;
-}
-
-// Function to create Psi(t=0)
-double Psi0(double x, double y) {
-    double Psi;
-    Psi = (1 / M_PI) * exp(- ( pow((x - 1), 2) + pow((y - 1), 2) ) );
-    return Psi;
-}
-// Function to create test wave function
-double test_Psi0(double x, double y) {
-    double Psi;
-    Psi = sin(x + y);
-    return Psi;
 }
